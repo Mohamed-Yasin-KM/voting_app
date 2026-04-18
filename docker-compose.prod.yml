@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: voting-app-db-prod
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-voting_app}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"  # Only accessible locally
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - voting-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=256MB -c max_connections=100"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voting-app-web-prod
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-voting_app}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      FLASK_ENV: production
+    expose:  # Don't expose to host, only to nginx
+      - "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - voting-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  nginx:
+    image: nginx:alpine
+    container_name: voting-app-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Uncomment for SSL:
+      # - ./certs/cert.pem:/etc/nginx/ssl/cert.pem:ro
+      # - ./certs/key.pem:/etc/nginx/ssl/key.pem:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - voting-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/postgres  # Persistent storage on host
+
+networks:
+  voting-network:
+    driver: bridge

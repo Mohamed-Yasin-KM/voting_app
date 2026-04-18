@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: voting-app-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-voting_app}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - voting-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voting-app-web
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-voting_app}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      FLASK_ENV: ${FLASK_ENV:-production}
+    ports:
+      - "${FLASK_PORT:-5000}:5000"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - voting-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  db_data:
+    driver: local
+
+networks:
+  voting-network:
+    driver: bridge
